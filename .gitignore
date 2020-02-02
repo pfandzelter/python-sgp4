@@ -2,5 +2,8 @@
 *.pyc
 /.tox/
 /.coverage
+/MANIFEST
+/build/
 /dist/
 /htmlcov/
+/t/

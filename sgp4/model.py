@@ -10,6 +10,31 @@ minutes_per_day = 1440.
 class Satrec(object):
     """Slow Python-only version of the satellite object."""
 
+    # Approximate the behavior of the C-accelerated class by locking
+    # down attribute access, to avoid folks accidentally writing code
+    # against this class and adding extra attributes, then moving to a
+    # computer where the C-accelerated class is used and having their
+    # code suddenly produce errors.
+    __slots__ = (
+        'Om', 'a', 'alta', 'altp', 'am', 'argpdot', 'argpo', 'atime', 'aycof',
+        'bstar', 'cc1', 'cc4', 'cc5', 'classification', 'con41', 'd2', 'd2201',
+        'd2211', 'd3', 'd3210', 'd3222', 'd4', 'd4410', 'd4422', 'd5220',
+        'd5232', 'd5421', 'd5433', 'dedt', 'del1', 'del2', 'del3', 'delmo',
+        'didt', 'dmdt', 'dnodt', 'domdt', 'e3', 'ecco', 'ee2', 'elnum', 'em',
+        'ephtype', 'epoch', 'epochdays', 'epochyr', 'error', 'error_message',
+        'eta', 'gsto', 'im', 'inclo', 'init', 'intldesg', 'irez', 'isimp',
+        'j2', 'j3', 'j3oj2', 'j4', 'jdsatepoch', 'mdot', 'method', 'mm', 'mo',
+        'mu', 'nddot', 'ndot', 'nm', 'no_kozai', 'no_unkozai', 'nodecf',
+        'nodedot', 'nodeo', 'om', 'omgcof', 'operationmode', 'peo', 'pgho',
+        'pho', 'pinco', 'plo', 'radiusearthkm', 'revnum', 'satnum', 'se2',
+        'se3', 'sgh2', 'sgh3', 'sgh4', 'sh2', 'sh3', 'si2', 'si3', 'sinmao',
+        'sl2', 'sl3', 'sl4', 't', 't2cof', 't3cof', 't4cof', 't5cof', 'tumin',
+        'whichconst', 'x1mth2', 'x7thm1', 'xfact', 'xgh2', 'xgh3', 'xgh4',
+        'xh2', 'xh3', 'xi2', 'xi3', 'xke', 'xl2', 'xl3', 'xl4', 'xlamo',
+        'xlcof', 'xli', 'xmcof', 'xni', 'zmol', 'zmos',
+    )
+
+    array = None       # replaced, if needed, with NumPy array()
     jdsatepochF = 0.0  # for compatibility with accelerated version
 
     @classmethod
@@ -23,14 +48,50 @@ class Satrec(object):
         r, v = sgp4(self, tsince)
         return self.error, r, v
 
+    def sgp4_array(self, jd, fr):
+        """Compute positions and velocities for the times in a NumPy array.
+
+        Given NumPy arrays ``jd`` and ``fr`` of the same length that
+        supply the whole part and the fractional part of one or more
+        Julian dates, return a tuple ``(e, r, v)`` of three vectors:
+
+        * ``e``: nonzero for any dates that produced errors, 0 otherwise.
+        * ``r``: position vectors in kilometers.
+        * ``v``: velocity vectors in kilometers per second.
+
+        """
+        # Import NumPy the first time sgp4_array() is called.
+        array = self.array
+        if array is None:
+            from numpy import array
+            Satrec.array = array
+
+        results = []
+        z = list(zip(jd, fr))
+        for jd_i, fr_i in z:
+            results.append(self.sgp4(jd_i, fr_i))
+        elist, rlist, vlist = zip(*results)
+
+        e = self.array(elist)
+        r = self.array(rlist)
+        v = self.array(vlist)
+
+        r.shape = v.shape = len(jd), 3
+        return e, r, v
+
 class SatrecArray(object):
     """Slow Python-only version of the satellite array."""
 
+    __slots__ = ('_satrecs',)
+
+    array = None  # replaced with NumPy array(), if the user tries calling
+
     def __init__(self, satrecs):
         self._satrecs = satrecs
-        # Cache optional import that we now know we need.
-        from numpy import array
-        self.array = array
+        # Import NumPy the first time a SatrecArray is instantiated.
+        if self.array is None:
+            from numpy import array
+            SatrecArray.array = array
 
     def sgp4(self, jd, fr):
         """Compute positions and velocities for the satellites in this array.
