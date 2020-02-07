@@ -21,6 +21,7 @@ env:
 
 install:
   - python -m pip install twine cibuildwheel==1.1.0
+  - which python > original-python
 
 script:
   # build the wheels, put them into './wheelhouse'
@@ -28,5 +29,6 @@ script:
 
 after_success:
   - ls -l wheelhouse/
+  - cat original-python
   # if the release was tagged, upload them to PyPI
-  - if [[ -n "$TWINE_PASSWORD" ]]; then python -m twine upload wheelhouse/*.whl; fi
+  - if [[ -n "$TWINE_PASSWORD" ]]; then $(cat original-python) -m twine upload wheelhouse/*.whl; fi
