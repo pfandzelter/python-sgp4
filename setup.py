@@ -26,7 +26,10 @@ if sys.version_info[0] == 3:
         # extra_link_args=['-fopenmp'],
 
         # Fall back to pure Python for folks without compilers.
-        optional=True,
+        # (Disabled on the "release" branch so the build fails if an OS
+        # cannot successfully compile the C extension.  Otherwise we
+        # will happily ship wheels with only Python inside.)
+        #optional=True,
     ))
 
 setup(name = 'sgp4',
