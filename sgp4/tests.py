@@ -12,7 +12,10 @@ import sys
 from doctest import DocTestSuite, ELLIPSIS
 from math import pi, isnan
 
-from sgp4.api import SGP4_ERRORS, Satrec, jday
+from sgp4.api import (
+    SGP4_ERRORS, WGS72OLD, WGS72, WGS84,
+    Satrec, jday, accelerated,
+)
 from sgp4.earth_gravity import wgs72
 from sgp4.ext import invjday, newtonnu, rv2coe
 from sgp4.propagation import sgp4
@@ -178,6 +181,35 @@ class NewSatelliteObjectTests(TestCase, SatelliteObjectTests):
         sat = self.build_satrec(good1, good2)
         self.assertEqual(sat.epochyr, 0)
 
+    def test_three_gravity_models(self):
+        # The numbers below are those produced by Vallado's C++ code.
+        # (Why does the Python version not produce the same values to
+        # high accuracy, instead of agreeing to only 4 places?)
+
+        digits = 12 if accelerated else 4
+        jd, fr = 2451723.5, 0.0
+
+        # Not specifying a gravity model should select WGS72.
+
+        for sat in (Satrec.twoline2rv(good1, good2),
+                    Satrec.twoline2rv(good1, good2, WGS72)):
+            e, r, v = sat.sgp4(jd, fr)
+            self.assertAlmostEqual(r[0], -3754.2514743216166, digits)
+            self.assertAlmostEqual(r[1], 7876.346817439062, digits)
+            self.assertAlmostEqual(r[2], 4719.220856478582, digits)
+
+        # Other gravity models should give different numbers both from
+        # the default and also from each other.
+
+        e, r, v = Satrec.twoline2rv(good1, good2, WGS72OLD).sgp4(jd, fr)
+        self.assertAlmostEqual(r[0], -3754.251473242793, digits)
+        self.assertAlmostEqual(r[1], 7876.346815095482, digits)
+        self.assertAlmostEqual(r[2], 4719.220855042922, digits)
+
+        e, r, v = Satrec.twoline2rv(good1, good2, WGS84).sgp4(jd, fr)
+        self.assertAlmostEqual(r[0], -3754.2437675772426, digits)
+        self.assertAlmostEqual(r[1], 7876.3549956188945, digits)
+        self.assertAlmostEqual(r[2], 4719.227897029576, digits)
 
 class LegacySatelliteObjectTests(TestCase, SatelliteObjectTests):
 
