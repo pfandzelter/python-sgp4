@@ -171,6 +171,16 @@ one.  Here is a sample computation for 2 satellites and 4 dates:
 The attributes of a ``Satrec`` object carry the data loaded from the TLE
 entry.  Look at the class's documentation for details.
 
+If you have a ``Satrec`` you want to share with friends or persist to a
+file, there’s an export routine that will turn it back into a TLE:
+
+>>> from sgp4.exporter import export_tle
+>>> line1, line2 = export_tle(satellite)
+>>> line1
+'1 25544U 98067A   19343.69339541  .00001764  00000-0  38792-4 0  9991'
+>>> line2
+'2 25544  51.6439 211.2001 0007417  17.6667  85.6398 15.50103472202482'
+
 The SGP4 algorithm operates atop a set of constants specifying how
 strong the Earth’s gravity is.  The most recent official paper on SGP4
 (see below) specifies that “We use WGS-72 as the default value”, so this
@@ -217,6 +227,7 @@ https://pypi.org/project/sgp4/1.4/
 Changelog
 ---------
 
+| 2020-04-20 — 2.6 — Added a new ``export_tle()`` routine. Improved how the accelerated C++ backend parses the ``intldesg`` string and ``revnum`` integer.
 | 2020-03-22 — 2.5 — Gave the new accelerated ``twoline2rv()`` an optional argument that lets the user choose a non-standard set of gravity constants.
 | 2020-02-25 — 2.4 — Improved the ``jday()`` docstring; made the old legacy Python resilient if the day of the month is out-of-range (past the end of the month) in a TLE; and Mark Rutten fixed the C++ so it compiles on Windows!
 | 2020-02-04 — 2.3 — Removed experimental code that caused performance problems for users with Numba installed.

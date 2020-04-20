@@ -106,8 +106,12 @@ Satrec_twoline2rv(PyTypeObject *cls, PyObject *args)
     // Copy both lines, since twoline2rv() might write to both buffers.
     strncpy(line1, string1, 130);
     strncpy(line2, string2, 130);
-    line1[129] = '\0';
-    line2[129] = '\0';
+
+    // Truncate the line before any checksum characters, if present;
+    // otherwise the C++ scanf() interprets each checksum character as
+    // part of the preceding value.
+    line1[68] = '\0';
+    line2[68] = '\0';
 
     SatrecObject *self = (SatrecObject*) cls->tp_alloc(cls, 0);
     if (!self)
@@ -115,6 +119,16 @@ Satrec_twoline2rv(PyTypeObject *cls, PyObject *args)
 
     SGP4Funcs::twoline2rv(line1, line2, ' ', ' ', 'i', whichconst,
                           dummy, dummy, dummy, self->satrec);
+
+    /* To avoid having scanf() interpret the "intldesg" as zero or as
+       several fields, the C++ library changes spaces to periods and
+       underscores.  Let's convert them back to avoid surprising users
+       and to match our Python implementation. */
+    if (self->satrec.intldesg[0] == '.')
+         self->satrec.intldesg[0] = ' ';
+    for (int i=1; i<11; i++)
+         if (self->satrec.intldesg[i] == '_')
+              self->satrec.intldesg[i] = ' ';
 
     return (PyObject*) self;
 }
@@ -180,7 +194,7 @@ static PyMemberDef Satrec_members[] = {
      PyDoc_STR("Drag Term in inverse Earth radii.")},
     {"ephtype", T_INT, O(ephtype), READONLY,
      PyDoc_STR("Ephemeris type (should be 0 in published TLEs).")},
-    {"elnum", T_INT, O(elnum), READONLY,
+    {"elnum", T_LONG, O(elnum), READONLY,
      PyDoc_STR("Element set number.")},
     {"inclo", T_DOUBLE, O(inclo), READONLY,
      PyDoc_STR("Inclination in radians.")},
@@ -215,7 +229,7 @@ static PyMemberDef Satrec_members[] = {
 static PyObject *
 get_intldesg(SatrecObject *self, void *closure)
 {
-  return PyUnicode_FromStringAndSize(self->satrec.intldesg, 6);
+    return PyUnicode_FromString(self->satrec.intldesg);
 }
 
 static PyGetSetDef Satrec_getset[] = {
