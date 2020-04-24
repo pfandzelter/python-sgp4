@@ -1583,7 +1583,7 @@ def sgp4init(
        // sgp4fix take out check to let satellites process until they are actually below earth surface
 //       if(satrec.error == 0)
      """
-     sgp4(satrec, 0.0);
+     sgp4(satrec, 0.0, whichconst);
 
      satrec.init = 'n';
 
@@ -1683,8 +1683,6 @@ def sgp4init(
 def sgp4(satrec, tsince, whichconst=None):
 
      mrt = 0.0
-     if whichconst is None:
-          whichconst = satrec.whichconst
 
      """
      /* ------------------ set mathematical constants --------------- */

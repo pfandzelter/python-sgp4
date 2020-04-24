@@ -1,9 +1,10 @@
 """The Satellite class."""
 
 from sgp4.earth_gravity import wgs72old, wgs72, wgs84
-from sgp4.ext import jday
+from sgp4.ext import days2mdhms, jday
+from sgp4.functions import jday as jday2
 from sgp4.io import twoline2rv
-from sgp4.propagation import sgp4
+from sgp4.propagation import sgp4, sgp4init
 
 WGS72OLD = 0
 WGS72 = 1
@@ -36,10 +37,10 @@ class Satrec(object):
         'whichconst', 'x1mth2', 'x7thm1', 'xfact', 'xgh2', 'xgh3', 'xgh4',
         'xh2', 'xh3', 'xi2', 'xi3', 'xke', 'xl2', 'xl3', 'xl4', 'xlamo',
         'xlcof', 'xli', 'xmcof', 'xni', 'zmol', 'zmos',
+        'jdsatepochF'
     )
 
     array = None       # replaced, if needed, with NumPy array()
-    jdsatepochF = 0.0  # for compatibility with accelerated version
 
     @property
     def no(self):
@@ -50,11 +51,32 @@ class Satrec(object):
         whichconst = gravity_constants[whichconst]
         self = cls()
         twoline2rv(line1, line2, whichconst, 'i', self)
-        self.epochyr %= 100  # undo my non-standard 4-digit year
+
+        # Install a fancy split JD of the kind the C++ natively supports.
+        # We rebuild it from the TLE year and day to maintain precision.
+        year = self.epochyr
+        month, day, h, m, s = days2mdhms(year, self.epochdays);
+        self.jdsatepoch, self.jdsatepochF = jday2(year, month, day, h, m, s)
+
+        # Undo my non-standard 4-digit year
+        self.epochyr %= 100
         return self
 
+    def sgp4init(self, whichconst, opsmode, satnum, epoch, bstar,
+                 ndot, nddot, ecco, argpo, inclo, mo, no_kozai, nodeo):
+        whichconst = gravity_constants[whichconst]
+        self.jdsatepoch, self.jdsatepochF = divmod(epoch, 1.0)
+        self.jdsatepoch += 2433281.5
+        sgp4init(whichconst, opsmode, satnum, epoch, bstar, ndot, nddot,
+                 ecco, argpo, inclo, mo, no_kozai, nodeo, self)
+
     def sgp4(self, jd, fr):
-        tsince = (jd - self.jdsatepoch + fr) * minutes_per_day
+        tsince = ((jd - self.jdsatepoch) * minutes_per_day +
+                  (fr - self.jdsatepochF) * minutes_per_day)
+        r, v = sgp4(self, tsince)
+        return self.error, r, v
+
+    def sgp4_tsince(self, tsince):
         r, v = sgp4(self, tsince)
         return self.error, r, v
 
@@ -82,9 +104,9 @@ class Satrec(object):
             results.append(self.sgp4(jd_i, fr_i))
         elist, rlist, vlist = zip(*results)
 
-        e = self.array(elist)
-        r = self.array(rlist)
-        v = self.array(vlist)
+        e = array(elist)
+        r = array(rlist)
+        v = array(vlist)
 
         r.shape = v.shape = len(jd), 3
         return e, r, v
