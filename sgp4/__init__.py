@@ -19,11 +19,19 @@ files.
 * Otherwise, a slower but reliable Python implementation of SGP4 is used
   instead.
 
-Note that this package produces raw Earth-centered cartesian
-coordinates.  It does not implement all the steps necessary to convert
-satellite positions into geographic coordinates.  For that, look for a
-comprehensive astronomy library that is built atop this one, like the
-`Skyfield <http://rhodesmill.org/skyfield/>`_ library:
+Note that the SGP4 propagator returns raw *x,y,z* Cartesian coordinates
+in a “True Equator Mean Equinox” (TEME) reference frame that’s centered
+on the Earth but does not rotate with it — an “Earth centered inertial”
+(ECI) reference frame.  The SGP4 propagator itself does not implement
+the math that’s necessary to convert these positions into more official
+ECI frames like J2000 or the ICRF.  Nor does it provide conversion into
+any Earth-centered Earth-fixed (ECEF) frames whose coordinates are fixed
+with respect to the Earth’s surface, like the ITRF that defines latitude
+and longitude.
+
+For conversions into other coordinate frames, look for a comprehensive
+astronomy library that is built atop this one, like the `Skyfield
+<http://rhodesmill.org/skyfield/>`_ library:
 
 http://rhodesmill.org/skyfield/earth-satellites.html
 
@@ -99,6 +107,60 @@ compute ``jd`` and ``fr`` from calendar dates using ``jday()``.
 2458826.5
 >>> fr
 0.5
+
+Epoch
+-----
+
+Over a given satellite’s lifetime, dozens or hundreds of different TLE
+records will be produced as its orbit evolves.  Each TLE record
+specifies the “epoch date” for which it is most accurate.  Typically a
+TLE is only useful for a couple of weeks to either side of its epoch
+date, beyond which its predictions become unreliable.
+
+Satellite objects natively provide their epoch as a two-digit year and
+then a fractional number of days into the year:
+
+>>> satellite.epochyr
+19
+>>> satellite.epochdays
+343.69339541
+
+Because Sputnik was launched in 1957, satellite element sets will never
+refer to an earlier year, so years 57 through 99 mean 1957–1999 while 0
+through 56 mean 2000–2056.  The TLE format will presumably be obsolete
+in 2057 and have to be upgraded to 4-digit years.
+
+To turn the number of days and its fraction into a calendar date and
+time, use the ``days2mdhms()`` function.
+
+>>> from sgp4.api import days2mdhms
+>>> month, day, hour, minute, second = days2mdhms(19, 343.69339541)
+>>> month
+12
+>>> day
+9
+>>> hour
+16
+>>> minute
+38
+>>> second
+29.363424
+
+The SGP4 library also translates those two numbers into a Julian date
+and fractional Julian date, since Julian dates are more commonly used in
+astronomy.
+
+>>> satellite.jdsatepoch
+2458826.5
+>>> satellite.jdsatepochF
+0.69339541
+
+Finally, a convenience function is available in the library if you need
+the epoch date and time as Python ``datetime``.
+
+>>> from sgp4.conveniences import sat_epoch_datetime
+>>> sat_epoch_datetime(satellite)
+datetime.datetime(2019, 12, 9, 16, 38, 29, 363423, tzinfo=UTC)
 
 Array Acceleration
 ------------------
@@ -216,7 +278,7 @@ satellite object to reset it to those new elements.
 ...     'i',             # 'a' = old AFSPC mode, 'i' = improved mode
 ...     5,               # satnum: Satellite number
 ...     18441.785,       # epoch: days since 1949 December 31 00:00 UT
-...     2.8098e-05,      # bstar: drag coefficient (kg/m2er)
+...     2.8098e-05,      # bstar: drag coefficient (/earth radii)
 ...     6.969196665e-13, # ndot: ballistic coefficient (revs/day)
 ...     0.0,             # nddot: second derivative of mean motion (revs/day^3)
 ...     0.1859667,       # ecco: eccentricity
@@ -234,6 +296,10 @@ The character provided as the second argument can be ``'a'`` to run the
 computations so that they are compatible with the old Air Force Space
 Command edition of the library, or ``'i'`` to run the new and improved
 version of the SGP4 algorithm.
+
+You can also directly access a satellite’s orbital parameters by asking
+for the attributes ``sat.epoch``, ``sat.bstar``, and so forth, using the
+names given in the comments above.
 
 Validation against the official algorithm
 -----------------------------------------
@@ -281,6 +347,7 @@ https://pypi.org/project/sgp4/1.4/
 Changelog
 ---------
 
+| 2020-05-21 — 2.9 — Added ``sat_epoch_datetime()``, expanded documentation around converting a satellite epoch to a date and time, and started rounding the epoch to exactly the digits provided in the TLE; and removed the ``Satrec.epoch`` attribute from Python fallback code to better match the C++ version.
 | 2020-05-07 — 2.8 — New function ``jday_datetime()`` is now available in the ``sgp4.conveniences`` module, thanks to Egemen Imre.
 | 2020-04-24 — 2.7 — New method ``sgp4init()`` (thank you, Chris Lewicki!) is available.
 | 2020-04-20 — 2.6 — New routine ``export_tle()`` (thank you, Egemen Imre!) is available. Improved how the accelerated C++ backend parses the ``intldesg`` string and the ``revnum`` integer.

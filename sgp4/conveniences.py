@@ -6,17 +6,19 @@ itself, native Python datetime handling could be convenient.
 
 """
 import datetime as dt
-from .functions import jday
+from .functions import days2mdhms, jday
 
 class _UTC(dt.tzinfo):
-     'UTC'
-     zero = dt.timedelta(0)
-     def utcoffset(self, datetime):
-          return self.zero
-     def tzname(self, datetime):
-          return 'UTC'
-     def dst(self, datetime):
-          return self.zero
+    'UTC'
+    zero = dt.timedelta(0)
+    def __repr__(self):
+        return 'UTC'
+    def dst(self, datetime):
+        return self.zero
+    def tzname(self, datetime):
+        return 'UTC'
+    def utcoffset(self, datetime):
+        return self.zero
 
 UTC = _UTC()
 
@@ -54,3 +56,18 @@ def jday_datetime(datetime):
     sec = u.second + u.microsecond * 1e-6
 
     return jday(year, mon, day, hr, minute, sec)
+
+def sat_epoch_datetime(sat):
+    """Return the epoch of the given satellite as a Python datetime."""
+    year = sat.epochyr
+    year += 1900 + (year < 57) * 100
+    days = sat.epochdays
+    month, day, hour, minute, second = days2mdhms(year, days)
+    if month == 12 and day > 31:  # for that time the ISS epoch was "Dec 32"
+        year += 1
+        month = 1
+        day -= 31
+    second, fraction = divmod(second, 1.0)
+    second = int(second)
+    micro = int(fraction * 1e6)
+    return dt.datetime(year, month, day, hour, minute, second, micro, UTC)
