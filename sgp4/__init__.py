@@ -3,7 +3,7 @@
 
 This Python package computes the position and velocity of an
 earth-orbiting satellite, given the satellite's TLE orbital elements
-from a source like `Celestrak <http://celestrak.com/>`_.  It implements
+from a source like `Celestrak <https://celestrak.com/>`_.  It implements
 the most recent version of SGP4, and is regularly run against the SGP4
 test suite to make sure that its satellite position predictions **agree
 to within 0.1 mm** with the predictions of the standard distribution of
@@ -31,9 +31,9 @@ and longitude.
 
 For conversions into other coordinate frames, look for a comprehensive
 astronomy library that is built atop this one, like the `Skyfield
-<http://rhodesmill.org/skyfield/>`_ library:
+<https://rhodesmill.org/skyfield/>`_ library:
 
-http://rhodesmill.org/skyfield/earth-satellites.html
+https://rhodesmill.org/skyfield/earth-satellites.html
 
 Usage
 -----
@@ -53,9 +53,9 @@ International Space Station at 12:50:19 on 29 June 2000:
 >>> e, r, v = satellite.sgp4(jd, fr)
 >>> e
 0
->>> print(r)
+>>> print(r)  # True Equator Mean Equinox position (km)
 (-6102.44..., -986.33..., -2820.31...)
->>> print(v)
+>>> print(v)  # True Equator Mean Equinox velocity (km/s)
 (-1.45..., -5.52..., 5.10...)
 
 As input, you can provide either:
@@ -228,6 +228,9 @@ one.  Here is a sample computation for 2 satellites and 4 dates:
   [-3.85  6.28 -1.85]
   [-3.91  6.25 -1.83]]]
 
+Attributes
+----------
+
 The attributes of a ``Satrec`` object carry the data loaded from the TLE
 entry.  Look at the class's documentation for details.
 
@@ -292,6 +295,10 @@ satellite object to reset it to those new elements.
 To compute the “epoch” value, simply take a normal Julian date and
 subtract ``2433281.5`` days.
 
+In addition to setting the attributes natively set by the underlying
+``sgp4init()`` routine, this library also goes ahead and sets the date
+fields ``epochyr``, ``epochdays``, ``jdsatepoch``, and ``jdsatepochF``.
+
 The character provided as the second argument can be ``'a'`` to run the
 computations so that they are compatible with the old Air Force Space
 Command edition of the library, or ``'i'`` to run the new and improved
@@ -314,10 +321,10 @@ originally published their revision of SGP4 in 2006:
     21–24.
 
 If you would like to review the paper, it is `available online
-<http://www.celestrak.com/publications/AIAA/2006-6753/>`_.  You can
+<https://www.celestrak.com/publications/AIAA/2006-6753/>`_.  You can
 always download the latest version of their code for comparison against
 this Python module (or other implementations) at `AIAA-2006-6753.zip
-<http://www.celestrak.com/publications/AIAA/2006-6753/AIAA-2006-6753.zip>`_.
+<https://www.celestrak.com/publications/AIAA/2006-6753/AIAA-2006-6753.zip>`_.
 
 For developers
 --------------
@@ -347,6 +354,7 @@ https://pypi.org/project/sgp4/1.4/
 Changelog
 ---------
 
+| 2020-10-14 — 2.13 — Enhanced ``sgp4init()`` with custom code that also sets the ``epochdays`` and ``epochyr`` satellite attributes.
 | 2020-05-28 — 2.12 — Moved the decision of whether to set the locale during ``twoline2rv()`` from import time to runtime, for users who change locales after their application is up and running.
 | 2020-05-24 — 2.11 — Fixed a regression in how dates are split into hours, minutes, and seconds that would sometimes produce a time whose second=60, crashing the pure-Python version of the library.
 | 2020-05-22 — 2.10 — Switch the locale temporarily to ``C`` during the C++ accelerated ``twoline2rv()``, since it does not protect its ``sscanf()`` calls from locales that, like German, expect comma decimal points instead of the period decimal points always used in a TLE.

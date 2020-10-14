@@ -6,18 +6,24 @@ except:
     from unittest import TestCase, main
 
 import datetime as dt
+import platform
 import re
 import sys
 from doctest import DocTestSuite, ELLIPSIS
 from math import pi, isnan
 from pkgutil import get_data
 
+try:
+    from io import StringIO
+except ImportError:
+    from StringIO import StringIO
+
 from sgp4.api import WGS72OLD, WGS72, WGS84, Satrec, jday, accelerated
 from sgp4.earth_gravity import wgs72
 from sgp4.ext import invjday, newtonnu, rv2coe
 from sgp4.functions import days2mdhms, _day_of_year_to_month_day
 from sgp4.propagation import sgp4, sgp4init
-from sgp4 import conveniences, io
+from sgp4 import conveniences, io, omm
 from sgp4.exporter import export_tle
 import sgp4.model as model
 
@@ -38,6 +44,7 @@ VANGUARD_ATTRS = {
     'satnum': 5,
     'operationmode': 'i',
     # Time
+    'epochyr': 0,
     'jdsatepoch': 2451722.5,
     # Orbit
     'bstar': 2.8098e-05,
@@ -51,7 +58,6 @@ VANGUARD_ATTRS = {
     'nodeo': 6.08638547138321,
 }
 VANGUARD_EPOCH = 18441.7849506199999894
-VANGUARD_EPOCHDAYS = 179.78495062
 
 # Handle deprecated assertRaisesRegexp, but allow its use Python 2.6 and 2.7
 if sys.version_info[:2] == (2, 7) or sys.version_info[:2] == (2, 6):
@@ -64,12 +70,10 @@ if sys.version_info[:2] == (2, 7) or sys.version_info[:2] == (2, 6):
 def test_satrec_built_with_twoline2rv():
     sat = Satrec.twoline2rv(LINE1, LINE2)
     verify_vanguard_1(sat)
-    assertEqual(sat.epochdays, VANGUARD_EPOCHDAYS)
 
 def test_legacy_built_with_twoline2rv():
     sat = io.twoline2rv(LINE1, LINE2, wgs72)
     verify_vanguard_1(sat, legacy=True)
-    assertEqual(sat.epochdays, VANGUARD_EPOCHDAYS)
 
 def test_satrec_initialized_with_sgp4init():
     # epochyr and epochdays are not set by sgp4init
@@ -232,7 +236,14 @@ def test_all_three_gravity_models_with_sgp4init():
     sat.sgp4init(WGS84, 'i', VANGUARD_ATTRS['satnum'], VANGUARD_EPOCH, *args)
     assert_wgs84(sat)
 
-GRAVITY_DIGITS = 12 if accelerated else 4
+GRAVITY_DIGITS = (
+    # Why don't Python and C agree more closely?
+    4 if not accelerated
+    # See https://github.com/conda-forge/sgp4-feedstock/pull/19 for details.
+    else 11 if platform.system() != 'Linux'
+    # Insist on very high precision on my Linux laptop.
+    else 12
+)
 
 def assert_wgs72old(sat):
     e, r, v = sat.sgp4_tsince(309.67110720001529)
@@ -377,6 +388,7 @@ def verify_vanguard_1(sat, legacy=False):
 
     if legacy:
         attrs = attrs.copy()
+        del attrs['epochyr']
         del attrs['jdsatepoch']
 
     for name, value in attrs.items():
@@ -388,6 +400,7 @@ def verify_vanguard_1(sat, legacy=False):
             raise e
 
     if not legacy:
+        assertAlmostEqual(sat.epochdays, 179.78495062, delta=3e-14)
         assertAlmostEqual(sat.jdsatepochF, 0.78495062, delta=1e-13)
 
 def sgp4init_args(d):
@@ -603,6 +616,73 @@ def format_long_line(satrec, tsince, mu, r, v):
         a, ecc, incl*rad, node*rad, argp*rad, nu*rad,
         m*rad, year, mon, day, hr, minute, sec,
     )
+
+# ----------------------------------------------------------------------
+#                         NEW "OMM" FORMAT TESTS
+
+
+# https://celestrak.com/satcat/tle.php?CATNR=5
+VANGUARD_TLE = """\
+VANGUARD 1              \n\
+1 00005U 58002B   20287.20333880 -.00000016  00000-0 -22483-4 0  9998
+2 00005  34.2443 225.5254 1845686 162.2516 205.2356 10.84869164218149
+"""
+
+# https://celestrak.com/NORAD/elements/gp.php?CATNR=00005&FORMAT=XML
+VANGUARD_XML = """\
+<?xml version="1.0" encoding="UTF-8"?>
+<ndm xmlns:xsi="https://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="https://sanaregistry.org/r/ndmxml/ndmxml-1.0-master.xsd">
+<omm id="CCSDS_OMM_VERS" version="2.0">
+<header><CREATION_DATE/><ORIGINATOR/></header><body><segment><metadata><OBJECT_NAME>VANGUARD 1</OBJECT_NAME><OBJECT_ID>1958-002B</OBJECT_ID><CENTER_NAME>EARTH</CENTER_NAME><REF_FRAME>TEME</REF_FRAME><TIME_SYSTEM>UTC</TIME_SYSTEM><MEAN_ELEMENT_THEORY>SGP4</MEAN_ELEMENT_THEORY></metadata><data><meanElements><EPOCH>2020-10-13T04:52:48.472320</EPOCH><MEAN_MOTION>10.84869164</MEAN_MOTION><ECCENTRICITY>.1845686</ECCENTRICITY><INCLINATION>34.2443</INCLINATION><RA_OF_ASC_NODE>225.5254</RA_OF_ASC_NODE><ARG_OF_PERICENTER>162.2516</ARG_OF_PERICENTER><MEAN_ANOMALY>205.2356</MEAN_ANOMALY></meanElements><tleParameters><EPHEMERIS_TYPE>0</EPHEMERIS_TYPE><CLASSIFICATION_TYPE>U</CLASSIFICATION_TYPE><NORAD_CAT_ID>5</NORAD_CAT_ID><ELEMENT_SET_NO>999</ELEMENT_SET_NO><REV_AT_EPOCH>21814</REV_AT_EPOCH><BSTAR>-.22483E-4</BSTAR><MEAN_MOTION_DOT>-1.6E-7</MEAN_MOTION_DOT><MEAN_MOTION_DDOT>0</MEAN_MOTION_DDOT></tleParameters></data></segment></body></omm>
+</ndm>
+"""
+
+# https://celestrak.com/NORAD/elements/gp.php?CATNR=00005&FORMAT=CSV
+VANGUARD_CSV = """\
+OBJECT_NAME,OBJECT_ID,EPOCH,MEAN_MOTION,ECCENTRICITY,INCLINATION,RA_OF_ASC_NODE,ARG_OF_PERICENTER,MEAN_ANOMALY,EPHEMERIS_TYPE,CLASSIFICATION_TYPE,NORAD_CAT_ID,ELEMENT_SET_NO,REV_AT_EPOCH,BSTAR,MEAN_MOTION_DOT,MEAN_MOTION_DDOT
+VANGUARD 1,1958-002B,2020-10-13T04:52:48.472320,10.84869164,.1845686,34.2443,225.5254,162.2516,205.2356,0,U,5,999,21814,-.22483E-4,-1.6E-7,0
+"""
+
+def test_omm_xml_matches_old_tle():
+    line0, line1, line2 = VANGUARD_TLE.splitlines()
+    sat1 = Satrec.twoline2rv(line1, line2)
+
+    fields = next(omm.parse_xml(StringIO(VANGUARD_XML)))
+    sat2 = Satrec()
+    omm.initialize(sat2, fields)
+
+    assert_satellites_match(sat1, sat2)
+
+def test_omm_csv_matches_old_tle():
+    line0, line1, line2 = VANGUARD_TLE.splitlines()
+    sat1 = Satrec.twoline2rv(line1, line2)
+
+    fields = next(omm.parse_csv(StringIO(VANGUARD_CSV)))
+    sat2 = Satrec()
+    omm.initialize(sat2, fields)
+
+    assert_satellites_match(sat1, sat2)
+
+def assert_satellites_match(sat1, sat2):
+    julian_fractions = {'epochdays', 'jdsatepochF'}
+    todo = {'classification', 'elnum', 'ephtype', 'intldesg', 'revnum',
+            'whichconst'}
+
+    for attr in dir(sat1):
+        if attr.startswith('_'):
+            continue
+        if attr in todo:
+            continue
+        value1 = getattr(sat1, attr, None)
+        if value1 is None:
+            continue
+        if callable(value1):
+            continue
+        value2 = getattr(sat2, attr)
+        if attr in julian_fractions:
+            value1 = round(value1, 10)
+            value2 = round(value2, 10)
+        assertEqual(value1, value2)
 
 # ----------------------------------------------------------------------
 
