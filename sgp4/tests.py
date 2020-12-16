@@ -8,6 +8,7 @@ except:
 import datetime as dt
 import platform
 import re
+import os
 import sys
 from doctest import DocTestSuite, ELLIPSIS
 from math import pi, isnan
@@ -183,9 +184,8 @@ def test_tle_export():
     expected_errs_line1 = set([25954, 29141, 33333, 33334, 33335])
     expected_errs_line2 = set([33333, 33335])
 
-    if accelerated:
-        # Non-standard: omits the ephemeris type integer.
-        expected_errs_line1.add(11801)
+    # Non-standard: omits the ephemeris type integer.
+    expected_errs_line1.add(11801)
 
     for line1 in tle_lines:
 
@@ -198,14 +198,30 @@ def test_tle_export():
         line1 = line1[:69]
         line2 = line2[:69]
         satrec = Satrec.twoline2rv(line1, line2)
+        satrec_old = io.twoline2rv(line1, line2, wgs72)
 
         # Generate TLE from satrec
         out_line1, out_line2 = export_tle(satrec)
+        out_line1_old, out_line2_old = export_tle(satrec_old)
 
         if satrec.satnum not in expected_errs_line1:
             assertEqual(out_line1, line1)
+            assertEqual(out_line1_old, line1)
         if satrec.satnum not in expected_errs_line2:
             assertEqual(out_line2, line2)
+            assertEqual(out_line2_old, line2)
+
+def test_export_tle_raises_error_for_out_of_range_angles():
+    # See https://github.com/brandon-rhodes/python-sgp4/issues/70
+    for angle in 'inclo', 'nodeo', 'argpo', 'mo':
+        sat = Satrec()
+        wrong_vanguard_attrs = VANGUARD_ATTRS.copy()
+        wrong_vanguard_attrs[angle] = -1.0
+        sat.sgp4init(
+            WGS84, 'i', wrong_vanguard_attrs['satnum'], VANGUARD_EPOCH,
+            *sgp4init_args(wrong_vanguard_attrs)
+        )
+        assertRaises(ValueError, export_tle, sat)
 
 def test_all_three_gravity_models_with_twoline2rv():
     # The numbers below are those produced by Vallado's C++ code.
@@ -239,10 +255,17 @@ def test_all_three_gravity_models_with_sgp4init():
 GRAVITY_DIGITS = (
     # Why don't Python and C agree more closely?
     4 if not accelerated
-    # See https://github.com/conda-forge/sgp4-feedstock/pull/19 for details.
-    else 11 if platform.system() != 'Linux'
-    # Insist on very high precision on my Linux laptop.
-    else 12
+
+    # Insist on very high precision on my Linux laptop, to signal me if
+    # some future adjustment subtlely changes the library's results.
+    else 12 if platform.system() == 'Linux' and platform.machine() == 'x86_64'
+
+    # Otherwise, reduce our expectations.  Note that at least 6 digits
+    # past the decimal point are necessary to let the test distinguish
+    # between WSG72OLD and WGS72.  See:
+    # https://github.com/conda-forge/sgp4-feedstock/pull/19
+    # https://github.com/brandon-rhodes/python-sgp4/issues/69
+    else 10
 )
 
 def assert_wgs72old(sat):
@@ -267,6 +290,28 @@ def assert_wgs84(sat):
 #                            Special Cases
 #
 
+def test_satnum_alpha5_encoding():
+    def make_sat(satnum_string):
+        return Satrec.twoline2rv(LINE1.replace('00005', satnum_string),
+                                 LINE2.replace('00005', satnum_string))
+
+    # Test cases from https://www.space-track.org/documentation#tle-alpha5
+    cases = [(100000, 'A0000'),
+             (148493, 'E8493'),
+             (182931, 'J2931'),
+             (234018, 'P4018'),
+             (301928, 'W1928'),
+             (339999, 'Z9999')]
+
+    for satnum, satnum_string in cases:
+        sat = make_sat(satnum_string)
+        assert sat.satnum == satnum
+
+    args = sgp4init_args(VANGUARD_ATTRS)
+    for satnum, satnum_string in cases:
+        sat.sgp4init(WGS72, 'i', satnum, VANGUARD_EPOCH, *args)
+        assert sat.satnum == satnum
+
 def test_intldesg_with_6_characters():
     sat = Satrec.twoline2rv(LINE1, LINE2)
     assertEqual(sat.intldesg, '58002B')
@@ -279,6 +324,24 @@ def test_intldesg_with_7_characters():
         '14.82098949344697',
     )
     assertEqual(sat.intldesg, '13066AE')
+
+def test_setters():
+    sat = Satrec()
+
+    sat.classification = 'S'
+    assert sat.classification == 'S'
+
+    sat.intldesg = 'Russian'
+    assert sat.intldesg == 'Russian'
+
+    sat.ephtype = 23
+    assert sat.ephtype == 23
+
+    sat.elnum = 123
+    assert sat.elnum == 123
+
+    sat.revnum = 1234
+    assert sat.revnum == 1234
 
 def test_hyperbolic_orbit():
     # Exercise the newtonnu() code path with asinh() to see whether
@@ -328,7 +391,6 @@ def test_months_and_days():
             tup = _day_of_year_to_month_day(day_of_year, True)
             assertEqual((month, day), tup)
             day_of_year += 1
-
 
 def test_december_32():
     # ISS [Orbit 606], whose date is 2019 plus 366.82137887 days.
@@ -462,25 +524,21 @@ def test_legacy_against_tcppver():
     run_satellite_against_tcppver(make_legacy_satellite, run_legacy_sgp4, errs)
 
 def run_satellite_against_tcppver(twoline2rv, invoke, expected_errors):
-    # Check whether a test run produces the output in tcppver.out
-
-    error_list = []
-    actual = generate_test_output(twoline2rv, invoke, error_list)
-    previous_data_line = None
-
-    # Iterate across "tcppver.out", making sure that we ourselves
-    # produce a line that looks very much like the corresponding
-    # line in that file.
+    # Check whether this library can produce (at least roughly) the
+    # output in tcppver.out.
 
     data = get_data(__name__, 'tcppver.out')
     tcppver_lines = data.decode('ascii').splitlines(True)
-    for i, expected_line in enumerate(tcppver_lines, start = 1):
 
-        try:
-            actual_line = next(actual)
-        except StopIteration:
-            raise ValueError(
-                'WARNING: our output ended early, on line %d' % (i,))
+    error_list = []
+    actual_lines = list(generate_test_output(twoline2rv, invoke, error_list))
+
+    assert len(tcppver_lines) == len(actual_lines) == 700
+
+    previous_data_line = None
+    linepairs = zip(tcppver_lines, actual_lines)
+
+    for lineno, (expected_line, actual_line) in enumerate(linepairs, start=1):
 
         if actual_line == '(Use previous data line)':
             actual_line = ('       0.00000000' +
@@ -515,20 +573,12 @@ def run_satellite_against_tcppver(twoline2rv, invoke, expected_errors):
                 '\n'
                 'Expected: %r\n'
                 'Got back: %r'
-                % (i, expected_line, actual_line))
+                % (lineno, expected_line, actual_line))
 
         if 'xx' not in actual_line:
             previous_data_line = actual_line
 
-    # Make sure the test file is not missing lines.
-
-    missing_count = 0
-    for actual_line in actual:
-        missing_count += 1
-
-    if missing_count > 0:
-        raise ValueError('we produced %d extra lines' % (missing_count,))
-
+    # Make sure we produced the correct list of errors.
     assertEqual(error_list, expected_errors)
 
 def generate_test_output(twoline2rv, invoke, error_list):
@@ -665,8 +715,7 @@ def test_omm_csv_matches_old_tle():
 
 def assert_satellites_match(sat1, sat2):
     julian_fractions = {'epochdays', 'jdsatepochF'}
-    todo = {'classification', 'elnum', 'ephtype', 'intldesg', 'revnum',
-            'whichconst'}
+    todo = {'whichconst'}
 
     for attr in dir(sat1):
         if attr.startswith('_'):
@@ -682,7 +731,7 @@ def assert_satellites_match(sat1, sat2):
         if attr in julian_fractions:
             value1 = round(value1, 10)
             value2 = round(value2, 10)
-        assertEqual(value1, value2)
+        assertEqual(value1, value2, '%s %r != %r' % (attr, value1, value2))
 
 # ----------------------------------------------------------------------
 
@@ -695,9 +744,17 @@ def load_tests(loader, tests, ignore):
     # Python 2.6 formats floating-point numbers a bit differently and
     # breaks the doctest, so we only run the doctest on later versions.
     if sys.version_info >= (2, 7):
-        tests.addTests(DocTestSuite('sgp4', optionflags=ELLIPSIS))
-        tests.addTests(DocTestSuite('sgp4.conveniences', optionflags=ELLIPSIS))
-        tests.addTests(DocTestSuite('sgp4.functions', optionflags=ELLIPSIS))
+
+        def setCwd(suite):
+            suite.olddir = os.getcwd()
+            os.chdir(os.path.dirname(__file__))
+        def restoreCwd(suite):
+            os.chdir(suite.olddir)
+
+        options = dict(optionflags=ELLIPSIS, setUp=setCwd, tearDown=restoreCwd)
+        tests.addTests(DocTestSuite('sgp4', **options))
+        tests.addTests(DocTestSuite('sgp4.conveniences', **options))
+        tests.addTests(DocTestSuite('sgp4.functions', **options))
 
     return tests
 

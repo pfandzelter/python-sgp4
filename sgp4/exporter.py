@@ -24,13 +24,19 @@ def export_tle(satrec):
         append(str(satrec.satnum).zfill(5))
 
     # Add classification code (use "U" if empty)
-    append((satrec.classification.strip() or "U") + " ")
+    classification = getattr(satrec, 'classification', 'U')
+    append(classification.strip() or 'U')
+    append(' ')
 
     # Add int'l designator and pad to 8 chars
-    append(satrec.intldesg.ljust(8, " ") + " ")
+    intldesg = getattr(satrec, 'intldesg', '')
+    append('{0:8} '.format(intldesg))
 
     # Add epoch year and days in YYDDD.DDDDDDDD format
-    append(str(satrec.epochyr).zfill(2) + "{:012.8f}".format(satrec.epochdays) + " ")
+    epochyr = satrec.epochyr
+    # Undo non-standard 4-digit year for old satrec objects
+    epochyr %= 100
+    append(str(epochyr).zfill(2) + "{:012.8f}".format(satrec.epochdays) + " ")
 
     # Add First Time Derivative of the Mean Motion (don't use "+")
     append("{0: 8.8f}".format(satrec.ndot * (_xpdotp * 1440.0)).replace("0", "", 1) + " ")
@@ -45,7 +51,9 @@ def export_tle(satrec):
     append("{0: 4.4e}".format(satrec.bstar * 10).replace(".", "").replace("e+00", "+0").replace("e-0", "-") + " ")
 
     # Add Ephemeris Type and Element Number
-    append("{} ".format(satrec.ephtype) + str(satrec.elnum).rjust(4, " "))
+    ephtype = getattr(satrec, 'ephtype', 0)
+    elnum = getattr(satrec, 'elnum', 0)
+    append('{0} {1:4}'.format(ephtype, elnum))
 
     # Join all the parts and add the Checksum
     line1 = ''.join(pieces)
@@ -62,18 +70,26 @@ def export_tle(satrec):
         append(str(satrec.satnum).zfill(5) + " ")
 
     # Add the inclination (deg)
+    if not 0 <= satrec.inclo <= pi:
+        raise ValueError("Inclination must be between 0 and pi, got %r", satrec.inclo)
     append("{0:8.4f}".format(satrec.inclo / _deg2rad).rjust(8, " ") + " ")
 
     # Add the RAAN (deg)
+    if not 0 <= satrec.nodeo <= 2 * pi:
+        raise ValueError("RAAN must be between 0 and 2 pi, got %r", satrec.nodeo)
     append("{0:8.4f}".format(satrec.nodeo / _deg2rad).rjust(8, " ") + " ")
 
     # Add the eccentricity (delete the leading zero an decimal point)
     append("{0:8.7f}".format(satrec.ecco).replace("0.", "") + " ")
 
     # Add the Argument of Perigee (deg)
+    if not 0 <= satrec.argpo <= 2 * pi:
+        raise ValueError("Argument of Perigee must be between 0 and 2 pi, got %r", satrec.argpo)
     append("{0:8.4f}".format(satrec.argpo / _deg2rad).rjust(8, " ") + " ")
 
     # Add the Mean Anomaly (deg)
+    if not 0 <= satrec.mo <= 2 * pi:
+        raise ValueError("Mean Anomaly must be between 0 and 2 pi, got %r", satrec.mo)
     append("{0:8.4f}".format(satrec.mo / _deg2rad).rjust(8, " ") + " ")
 
     # Add the Mean Motion (revs/day)

@@ -162,6 +162,7 @@ Satrec_twoline2rv(PyTypeObject *cls, PyObject *args)
 static PyObject *
 Satrec_sgp4init(PyObject *self, PyObject *args)
 {
+    char satnum_str[6];
     int whichconst;  /* "int" rather than "gravconsttype" so we know size */
     int opsmode;     /* "int" rather than "char" because "C" needs an int */
     long int satnum;
@@ -173,17 +174,28 @@ Satrec_sgp4init(PyObject *self, PyObject *args)
                           &ecco, &argpo, &inclo, &mo, &no_kozai, &nodeo))
         return NULL;
 
+    // See https://www.space-track.org/documentation#tle-alpha5
+    if (satnum < 100000) {
+        snprintf(satnum_str, 6, "%ld", satnum);
+    } else {
+        char c = 'A' + satnum / 10000 - 10;
+        if (c > 'I') c++;
+        if (c > 'O') c++;
+        satnum_str[0] = c;
+        snprintf(satnum_str + 1, 5, "%04ld", satnum % 10000);
+    }
+
     elsetrec &satrec = ((SatrecObject*) self)->satrec;
 
-    SGP4Funcs::sgp4init((gravconsttype) whichconst, opsmode, satnum, epoch,
+    SGP4Funcs::sgp4init((gravconsttype) whichconst, opsmode, satnum_str, epoch,
                         bstar, ndot, nddot, ecco, argpo, inclo, mo, no_kozai,
                         nodeo, satrec);
 
     /* Populate date fields that SGP4Funcs::twoline2rv would set. */
     int y, m, d, H, M;
     double S, jan0jd, jan0fr /* always comes out 0.0 */;
-    SGP4Funcs::invjday(2433281.5, epoch, y, m, d, H, M, S);
-    SGP4Funcs::jday(y, 1, 0, 0, 0, 0.0, jan0jd, jan0fr);
+    SGP4Funcs::invjday_SGP4(2433281.5, epoch, y, m, d, H, M, S);
+    SGP4Funcs::jday_SGP4(y, 1, 0, 0, 0, 0.0, jan0jd, jan0fr);
     satrec.epochyr = y % 1000;
     satrec.epochdays = 2433281.5 - jan0jd + epoch;
     satrec.jdsatepochF = modf(epoch, &satrec.jdsatepoch);
@@ -254,15 +266,13 @@ static PyMethodDef Satrec_methods[] = {
 static PyMemberDef Satrec_members[] = {
     /* Listed in the order they appear in a TLE record. */
 
-    {"satnum", T_LONG, O(satnum), READONLY,
-     PyDoc_STR("Satellite number, from characters 3-7 of each TLE line.")},
     {"operationmode", T_CHAR, O(operationmode), READONLY,
      PyDoc_STR("Operation mode: 'a' legacy AFSPC, or 'i' improved.")},
     {"jdsatepoch", T_DOUBLE, O(jdsatepoch), READONLY,
      PyDoc_STR("Julian date of epoch, day number (see jdsatepochF).")},
     {"jdsatepochF", T_DOUBLE, O(jdsatepochF), READONLY,
      PyDoc_STR("Julian date of epoch, fraction of day (see jdsatepoch).")},
-    {"classification", T_CHAR, O(classification), READONLY,
+    {"classification", T_CHAR, O(classification), 0,
      "Usually U=Unclassified, C=Classified, or S=Secret."},
     /* intldesg: inline character array; see Satrec_getset. */
     {"epochyr", T_INT, O(epochyr), READONLY,
@@ -275,9 +285,9 @@ static PyMemberDef Satrec_members[] = {
      PyDoc_STR("Second Derivative of Mean Motion in revs/day^3.")},
     {"bstar", T_DOUBLE, O(bstar), READONLY,
      PyDoc_STR("Drag Term in inverse Earth radii.")},
-    {"ephtype", T_INT, O(ephtype), READONLY,
+    {"ephtype", T_INT, O(ephtype), 0,
      PyDoc_STR("Ephemeris type (should be 0 in published TLEs).")},
-    {"elnum", T_LONG, O(elnum), READONLY,
+    {"elnum", T_LONG, O(elnum), 0,
      PyDoc_STR("Element set number.")},
     {"inclo", T_DOUBLE, O(inclo), READONLY,
      PyDoc_STR("Inclination in radians.")},
@@ -291,7 +301,7 @@ static PyMemberDef Satrec_members[] = {
      PyDoc_STR("Mean anomaly in radians.")},
     {"no_kozai", T_DOUBLE, O(no_kozai), READONLY,
      PyDoc_STR("Mean motion in radians per minute.")},
-    {"revnum", T_LONG, O(revnum), READONLY,
+    {"revnum", T_LONG, O(revnum), 0,
      PyDoc_STR("Integer revolution number at the epoch.")},
 
     /* For compatibility with the old struct members, also accept the
@@ -334,7 +344,7 @@ static PyMemberDef Satrec_members[] = {
 
     {"tumin", T_DOUBLE, O(tumin), READONLY,
      PyDoc_STR("minutes in one time unit")},
-    {"mu", T_DOUBLE, O(mu), READONLY,
+    {"mu", T_DOUBLE, O(mus), READONLY,
      PyDoc_STR("Earth gravitational parameter")},
     {"radiusearthkm", T_DOUBLE, O(radiusearthkm), READONLY,
      PyDoc_STR("radius of the earth in km")},
@@ -370,18 +380,51 @@ static PyMemberDef Satrec_members[] = {
 static PyObject *
 get_intldesg(SatrecObject *self, void *closure)
 {
-    int length = 7;
-    while (length && self->satrec.intldesg[length-1] == ' ')
+    int length = 0;
+    char *s = self->satrec.intldesg;
+    while (length <= 7 && s[length])
+        length++;
+    while (length && s[length-1] == ' ')
         length--;
-    return PyUnicode_FromStringAndSize(self->satrec.intldesg, length);
+    return PyUnicode_FromStringAndSize(s, length);
+}
+
+static int
+set_intldesg(SatrecObject *self, PyObject *value, void *closure)
+{
+    if (!PyUnicode_Check(value))
+        return -1;
+    const char *s = PyUnicode_AsUTF8(value);
+    if (!s)
+        return -1;
+    strncpy(self->satrec.intldesg, s, 11);
+    return 0;
+}
+
+static PyObject *
+get_satnum(SatrecObject *self, void *closure)
+{
+    char *s = self->satrec.satnum;
+    long n;
+    if (strlen(s) < 5 || s[0] <= '9')
+        n = atol(s);
+    else if (s[0] <= 'I')
+        n = (s[0] - 'A' + 10) * 10000 + atol(s + 1);
+    else if (s[0] <= 'O')
+        n = (s[0] - 'A' + 9) * 10000 + atol(s + 1);
+    else
+        n = (s[0] - 'A' + 8) * 10000 + atol(s + 1);
+    return PyLong_FromLong(n);
 }
 
 static PyGetSetDef Satrec_getset[] = {
-    {"intldesg", (getter)get_intldesg, NULL,
+    {"intldesg", (getter)get_intldesg, (setter)set_intldesg,
      PyDoc_STR("International Designator: a string of up to 7 characters"
                " from the first line of the TLE that typically provides"
                " two digits for the launch year, a 3-digit launch number,"
                " and one or two letters for which piece of the launch.")},
+    {"satnum", (getter)get_satnum, NULL,
+     PyDoc_STR("Satellite number, from characters 3-7 of each TLE line.")},
     {NULL},
 };
 
